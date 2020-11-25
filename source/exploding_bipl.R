@@ -3,7 +3,7 @@ function(data,
          percentile_included=0.99,
          use_convex_hull=FALSE,
          fact_=1.5, 
-         draw_more_ticks=1,
+         numticksfact=1,
          round_ticks_to=2,
          ticks_in_original_units=TRUE,
          plot_the_dens=TRUE,
@@ -20,7 +20,10 @@ function(data,
          var_names=TRUE,
          gray_scale=TRUE,
          EVchoice = c(1,2),
-         plotqual = TRUE
+         plotqual = TRUE,
+         coloverride = NULL,
+         scaledmat = FALSE,
+         cvscaledmat = FALSE
 )
 {
   if(use_percentile_for_plotting==TRUE & draw_ellipse==TRUE){
@@ -286,7 +289,7 @@ function(data,
         result <- ifelse(((z[, 2] - zy.on.pg)/max(z[, 2] - 
                                                     zy.on.pg) - 1e-10) < 0, "lower", "higher")
       }
-      print(result)
+      #print(result)
       return(result)
     }
     find.polygon.center <- function(xy) {
@@ -1199,6 +1202,15 @@ function(data,
   
   m_p1=apply(p1.unscaled,2,mean)
   s_p1=apply(p1.unscaled,2,std)
+  cv_p1 = s_p1/m_p1
+  if (scaledmat) 
+    scaled.dat <- scale(p1.unscaled)
+  else {
+    scaled.dat <- scale(p1.unscaled, scale = FALSE)
+    s_p1 <- rep(1, ncol(p1.unscaled))
+  }
+
+  
   p1.scaled=scale(p1.unscaled,center = TRUE,scale=TRUE)
   
   if(is.null(colnames(p1.scaled))==TRUE){
@@ -1210,13 +1222,27 @@ function(data,
   PCA_biplot.inputs=function(dat,r=2){#r=2
     n=nrow(dat)
     p=ncol(dat)
-    scaled.dat=scale(dat,center=TRUE,scale=TRUE)
+    m_p1=apply(dat,2,mean)
+    s_p1=apply(dat,2,std)
+    if (scaledmat) 
+      scaled.dat <- scale(dat)
+    else {
+      scaled.dat <- scale(dat, scale = FALSE)
+      s_p1 <- rep(1, ncol(dat))
+    }
+    
     p_comp=svd(scaled.dat)
     SIG=diag(p_comp$d)
     U_r=p_comp$u[,EVchoice]
     SIG_r=SIG[EVchoice,EVchoice]
     V_r=p_comp$v[,EVchoice]
     points=U_r%*%SIG_r
+    
+  
+    approxmat <<- points %*% t(V_r)
+    approxmat <<- sweep(approxmat, 2, s_p1, "*")
+    approxmat <<- sweep(approxmat, 2, m_p1, "+")
+    
     axes=V_r
     #coordinate of a marker on the kth biplot axes of 1 unit of the kth variable
     e_k=diag(1,nrow=p)
@@ -1238,19 +1264,16 @@ function(data,
     lambda.mat <- diag(eigval)
     eigval.r <- eigval[EVchoice]
     lambda.r.mat <- diag(eigval.r)
+    
     fit.predictivity.mat <- diag(diag(Vr.before.rotate %*% 
-                                        lambda.r.mat %*% t(Vr.before.rotate))) %*% solve(diag(diag(V.mat %*% 
-                                                                                                     lambda.mat %*% t(V.mat))))
+                            lambda.r.mat %*% t(Vr.before.rotate))) %*% solve(diag(diag(V.mat %*% 
+                            lambda.mat %*% t(V.mat))))
     fit.predictivity <- round(diag(fit.predictivity.mat),digits = 3)
     names(fit.predictivity) <- dimnames(dat)[[2]]
     fit.quality <- paste0("Quality of display = ", round(((eigval[EVchoice[1]] + 
-                                                             eigval[EVchoice[2]])/sum(eigval)) * 100, digits = 2), "%")
-    
-    
-    
-    #quality=sum(p_comp$d[EVchoice])/sum(p_comp$d)
-    
-    ret=list('points'=points,'axes'=axes,'len_1_unit'=c_proj,quality=fit.quality,axqual = fit.predictivity)
+                    eigval[EVchoice[2]])/sum(eigval)) * 100, digits = 2), "%")
+
+    ret=list('points'=points,'axes'=axes,'len_1_unit'=c_proj,quality=fit.quality,axqual = fit.predictivity,approxmat = approxmat)
     return(ret)
   }
   
@@ -1298,7 +1321,7 @@ function(data,
   
   #ellipse
   exy.=ellipsoidhull(p1)
-  exy.full=ellipsoidhull(p11) #
+  exy.full=ellipsoidhull(p11) 
   p_exy.=predict.ellipsoid(exy.,d2=d2.perc)
   p_exy.full=predict.ellipsoid(exy.full)
   t=p_exy.[,1]
@@ -1615,7 +1638,11 @@ function(data,
     grps=1}
   D_x=list()
   D_y=list()
+  densdrawn <- (1:length(unique(cluster_var)))[table(cluster_var)>1]
+  densnotdrawn <- (1:length(unique(cluster_var)))[table(cluster_var)<=1]
+  templist<<- list()
   for(i in 1:length(m)){
+    templist[[i]]<<-list()
     for(vv in 1:length(grps)){
       #generate densities
       #rotate them
@@ -1626,7 +1653,8 @@ function(data,
       if(length(grps)>1){
         if(counts_or_densities=='densities'){
           if(sum(cluster_var==grps[vv])<=1){
-            stop('Too few points per cluster to produce a distribution by cluster. Either set plot_the_dens=FALSE or cluster_var=NULL')}
+            print('Too few points per cluster to produce a distribution by cluster. Either set plot_the_dens=FALSE or cluster_var=NULL. Not all densities drawn.')}
+          if(sum(cluster_var==grps[vv])>1){
           size_of_br=((max(proj_onto_var[,i][cluster_var==grps[vv]])-min(proj_onto_var[,i][cluster_var==grps[vv]])))/nr_of_breaks
           br=seq(min(proj_onto_var[,i][cluster_var==grps[vv]]),max(proj_onto_var[,i][cluster_var==grps[vv]]),by=size_of_br)
           den_=hist(proj_onto_var[,i][cluster_var==grps[vv]],breaks=br,plot=FALSE)$density*(fact_)
@@ -1643,20 +1671,22 @@ function(data,
             mids=smoothingSpline$x
             den=smoothingSpline$y
           }
-          
+        }
         }
         
+   
         if(counts_or_densities=='counts'){
           if(sum(cluster_var==grps[vv])<=1){
-            stop('Too few points per cluster to produce a distribution by cluster. Either set plot_the_dens=FALSE or cluster_var=NULL')}
-          size_of_br=((max(proj_onto_var[,i][cluster_var==grps[vv]])-min(proj_onto_var[,i][cluster_var==grps[vv]])))/nr_of_breaks
-          br=seq(min(proj_onto_var[,i][cluster_var==grps[vv]]),max(proj_onto_var[,i][cluster_var==grps[vv]]),by=size_of_br)
-          den_=hist(proj_onto_var[,i][cluster_var==grps[vv]],breaks=br,plot=FALSE)$counts*fact_/10
-          mids_=hist(proj_onto_var[,i][cluster_var==grps[vv]],breaks=br,plot=FALSE)$mids
+            print('Too few points per cluster to produce a distribution by cluster. Either set plot_the_dens=FALSE or cluster_var=NULL. Not all densities drawn.')}
+          if(sum(cluster_var==grps[vv])>1) {
+            size_of_br=((max(proj_onto_var[,i])-min(proj_onto_var[,i])))/(nr_of_breaks*length(grps))
+             br=seq(min(proj_onto_var[,i][cluster_var==grps[vv]])-size_of_br,max(proj_onto_var[,i][cluster_var==grps[vv]])+size_of_br,by=size_of_br)
+            den_=hist(proj_onto_var[,i][cluster_var==grps[vv]],breaks=br,plot=FALSE)$counts*fact_/10
+            mids_=hist(proj_onto_var[,i][cluster_var==grps[vv]],breaks=br,plot=FALSE)$mids
           den=c(0,den_,0)
           size_of_jump=mids_[2]-mids_[1]
           mids=c(mids_[1]-size_of_jump,mids_,mids_[length(mids_)]+size_of_jump)
-          if(smoothing_method=='smooth.spline'){
+           if(smoothing_method=='smooth.spline'){
             smoothingSpline = smooth.spline(mids, den, spar=smooth_par)
             #to make sure the smoothing par for the first distribution is used for all the densities
             if(is.null(smooth_par)& i==1 & vv==1){
@@ -1664,6 +1694,7 @@ function(data,
             }#
             mids=smoothingSpline$x
             den=smoothingSpline$y
+          }
           }
         }
       }
@@ -1722,24 +1753,38 @@ function(data,
     }
     assign('D_x',D_x,envir=globalenv())
     assign('D_y',D_y,envir=globalenv())
+
   }
   
   ticks=array(0,dim = c(length(c(-1:-100,0,1:100)),3,ncol(p1.unscaled)))
+  ticks <- list()
+  
   #create tick marks
   for(i in 1:ncol(p1.unscaled)){
-    x_=c(rev((-1:-100)/(draw_more_ticks)*PCA$len_1_unit[1,i]),0,(1:100)/(draw_more_ticks)*PCA$len_1_unit[1,i])
-    y_=c(rev((-1:-100)/(draw_more_ticks)*PCA$len_1_unit[2,i]),0,(1:100)/(draw_more_ticks)*PCA$len_1_unit[2,i])
-    tick=c(rev(-1:-100)/(draw_more_ticks),0,1:100/(draw_more_ticks))
-    ticks[,,i]=cbind(x_,y_,tick)
+    axestemp <<- axes
+    p11temp <<- p11
+    
+    tickog <- pretty(PCA$approxmat[,i],numticksfact)
+    tick <- (tickog - m_p1[i])/s_p1[i]
+    
+    tickogtemp <<- tickog
+    ticktemp <<- tick
+    
+    x_=tick*PCA$len_1_unit[1,i]
+    y_=tick*PCA$len_1_unit[2,i]
+
+    ticks[[i]] <- cbind(x_,y_,tick)
   }
+  
+
   
   
   tick_x=list()
   tick_y=list()
   for(i in 1:length(m)){
     #move them out towards their lines
-    moved_rotated_x=d_list[i]/sqrt((1/m[i])^2+1)+ticks[,1,i]
-    moved_rotated_y=-1/m[i]*(moved_rotated_x-ticks[,1,i])+ticks[,2,i]
+    moved_rotated_x=d_list[i]/sqrt((1/m[i])^2+1)+ticks[[i]][,1]
+    moved_rotated_y=-1/m[i]*(moved_rotated_x-ticks[[i]][,1])+ticks[[i]][,2]
     tick_x=append(tick_x,list(moved_rotated_x),after=length(tick_x))
     tick_y=append(tick_y,list(moved_rotated_y),after=length(tick_y))
   }
@@ -1802,8 +1847,8 @@ function(data,
     colnames(storehouse)[i-1]=paste0('x',i/2)
     colnames(storehouse)[i]=paste0('y',i/2)
   } 
-  ticks=as.data.frame(ticks[,3,1])
-  colnames(ticks)=c('v')
+  #ticks=as.data.frame(ticks[,3,])
+  #colnames(ticks)=c('v')
   I_=array(I_)
   dimnames(I_)=list(paste(colnames(p1.unscaled)))
   
@@ -1879,7 +1924,7 @@ function(data,
   #Add densities here to the dataset
   
   if(gray_scale==TRUE){
-    col_m=gray.colors(length(m)+length(grps), start = 0.45, end = 0.8, gamma = 2.2, alpha = NULL)
+    col_m=gray.colors(length(grps), start = 0.45, end = 0.8, gamma = 2.2, alpha = NULL)
   }
   else{
     pal = c(
@@ -1905,15 +1950,19 @@ function(data,
     )
     
 
+
     col_m=c(pal,pal2)[1:(length(grps))]
-    
+    if(!is.null(coloverride))
+    {
+      col_m = coloverride
+    }
   }
   
   
   p <- plot_ly()
   
   #DATAPOINTS
-  col_seq=seq(1,(length(m)+length(grps)),length.out = length(grps))
+  #col_seq=seq(1,(length(m)+length(grps)),length.out = length(grps))
   if(plot_all_the_data==TRUE){
     if(length(cluster_var)==1)leg_entree='data'
     if(length(cluster_var)>1) leg_entree=paste(grps)
@@ -1923,13 +1972,13 @@ function(data,
         p= add_markers(p,data=dataset, x = ~round(dataset$points[,1],3), y = ~round(dataset$points[,2],3),
                        color=I(col_m[1]),colors=col_m,
                        type='scatter',mode='markers',
-                       marker=list(size=4),showlegend=TRUE,name='data',
+                       marker=list(size=6),showlegend=TRUE,name='data',
                        hoverinfo='text',text=~paste(1:length(dataset$points[,1])))
       }else{
         p= add_markers(p,data=dataset, x = ~round(dataset$points[,1],3), y = ~round(dataset$points[,2],3),color=~as.factor(dataset$points[,3]),
                        colors=col_m,
                        type='scatter',mode='markers',
-                       marker=list(size=4),showlegend=TRUE,name=paste(unique(cluster_var)),
+                       marker=list(size=6),showlegend=TRUE,name=paste(unique(cluster_var)),
                        hoverinfo='text',text=~paste(1:length(dataset$points[,1])))
       }
     }
@@ -1938,17 +1987,46 @@ function(data,
         p= add_markers(p,data=dataset, x = ~round(dataset$points[,1],3), y = ~round(dataset$points[,2],3),
                        color=I(col_m[1]),colors=col_m,
                        type='scatter',mode='markers',
-                       marker=list(size=4),showlegend=TRUE,name='data',
+                       marker=list(size=6),showlegend=TRUE,name='data',
                        hoverinfo='text',text=~paste(rownames(p1.unscaled)))
       }
       else 
         p= add_markers(p,data=dataset, x = ~round(dataset$points[,1],3), y = ~round(dataset$points[,2],3),color=~as.factor(dataset$points[,3]),
                        colors=col_m,
                        type='scatter',mode='markers',
-                       marker=list(size=4),showlegend=TRUE,
+                       marker=list(size=6),showlegend=TRUE,
                        hoverinfo='text',text=~paste(rownames(p1.unscaled)))
     }                 
   }
+  
+  #print(densnotdrawn)
+  if(length(densnotdrawn)>0)
+  {
+   xprintslist <- list()
+   ilist<- 0
+   for (ig in 1:(length(grps)))
+   {
+    if((sum(densnotdrawn==ig) >= 1))
+    {
+    ilist <- ilist+1
+    xprintslist[[ilist]] <- c(round(dataset$points[dataset$points[,3]==grps[ig],1],3), round(dataset$points[dataset$points[,3]==grps[ig],2],3),
+                            rownames(p1.unscaled)[dataset$points[,3]==grps[ig]])
+    }
+   }
+    toprint <- do.call(rbind, xprintslist)
+    p =  add_annotations(p, 
+                         x = toprint[,1],
+                         y = toprint[,2],
+                         text = toprint[,3],
+                         xref = "x",
+                         yref = "y",
+                         showarrow = TRUE,
+                         arrowhead = 4,
+                         arrowsize = .5,
+                         ax = 20,
+                         ay = -40)
+  }
+  
   
   
   #VARIABLE LINES
@@ -1971,42 +2049,53 @@ function(data,
   
   #DENSITY
   if(plot_the_dens==TRUE){
-
-    for(i in 1:(length(m)*length(grps))){
-      x = i
-      y = i
+    
+    x <- 0
+    y <- 0
+   
+  for (im in 1:length(m))
+   for (ig in 1:length(grps))
+     {     
+       {
+      
+      x = x+1
+      y = y+1
+      
       if(length(grps)>1){
         if(!is.null(colnames(p1.unscaled))){#if there is colnames
-          n=paste0(unique(cluster_var)[rep((1:length(grps)),length(m))[i]],', ',colnames(p1.unscaled)[ceiling((1:(length(grps)*length(m)))/length(grps))][i])
+          n=paste0(unique(cluster_var)[ig],', ',colnames(p1.unscaled)[im])
         }
         if(is.null(colnames(p1.unscaled))){
-          n=paste0(unique(cluster_var)[rep((1:length(grps)),length(m))[i]],', ','Var',ceiling(i/length(grps)))
+          n=paste0(unique(cluster_var)[ig],', ','Var ',im)
         }
       }
       if(length(grps)==1){
         if(!is.null(colnames(p1.unscaled))){
-          n=paste0(colnames(p1.unscaled)[i],' density')
+          n=paste0(colnames(p1.unscaled)[im],' density')
         }
         if(!is.null(colnames(p1.unscaled))){
-          n=paste0('Var',ceiling(i/length(grps)),' density')
+          n=paste0('Var ',im,' density')
         }
         
       }
       
       if(length(length(grps)>1)){
-        C=col_m[rep(1:length(grps),length(m))[i]]
+        C=col_m[1:length(grps)][ig]
       }
       if(length(grps)==1) {C=col_m[1]}
       
-      te= paste0(c_names[ceiling(i/length(grps))],', m=',m_temp[ceiling(i/length(grps))])
+      te= paste0(c_names[im],', m=',m_temp[im])
+      if (sum(densdrawn==ig) == 1)
+      {
       p <- add_trace(p, 
                      x = dataset$D_x[[x]], 
                      y = dataset$D_y[[y]], 
                      type = 'scatter', 
                      mode = 'lines',
                      showlegend=TRUE,line = list(width =1.5 ,dash='dot',color=paste(C)),name=n ,hoverinfo='text',text=n)#
+      }
     }
-    # }
+     }
   }
   
   #ELLIPSE
@@ -2037,22 +2126,25 @@ function(data,
     x_n=x[dataset$I_[[ind]]]
     y=dataset$tick_y[[ind]]
     y_n=y[dataset$I_[[ind]]]
-    C_=col_m[-col_seq][i]
+
     if(ticks_in_original_units==TRUE){
-      tick=dataset$ticks*dataset$s_p1[i]+dataset$m_p1[i]
+      tick=dataset$ticks[[i]][,3]*dataset$s_p1[i]+dataset$m_p1[i]
     }
     if(ticks_in_original_units==FALSE){
-      tick=dataset$ticks
+      tick=dataset$ticks[[i]][,3]
     }
     
-    tick_n=round(tick[I_[[ind]],1],round_ticks_to)
+
+    tick_n_text=format(tick[I_[[ind]]],zero.print = T)
+    tick_n = as.numeric(tick_n_text)
+    assign("temptick_n", tick_n, envir=globalenv())
     tick_list=append(tick_list,list(tick_n),length(tick_list))
     tick_position_x=append(tick_position_x,list(x_n),after=length(tick_position_x))
     tick_position_y=append(tick_position_y,list(y_n),length(tick_position_y))
     
-    p<-add_text(p,x=x_n,y=y_n,text=tick_n,textposition='top right',showlegend=FALSE,size=I(tick_size),hoverinfo='text')
+    p<-add_text(p,x=x_n,y=y_n,text=tick_n_text,textposition='top right',showlegend=FALSE,size=I(tick_size),hoverinfo='text')
     p<-add_markers(p,x=x_n,y=y_n,size=I(6),showlegend=FALSE,hoverinfo='text',marker=list(color=I(gray(0.3)),
-                                                                                         line = list(width = 0)))
+                   line = list(width = 0)))
    
     if(is.numeric(name)==TRUE& !is.null(name))
       predicted_val[i]=(proj_lines[i,1,name]-x_n[1])*(tick_n[length(tick_n)]-tick_n[1])/(x_n[length(x_n)]-x_n[1])+tick_n[1]
@@ -2068,7 +2160,7 @@ function(data,
     x=paste0('x',i)
     y=paste0('y',i)
     ind=i
-    n=paste0(c_names[i])
+    n=paste0('<b>',c_names[i],'</b>')
     if(plotqual == TRUE) texpos <- "top center"
     if(plotqual == FALSE) texpos <- "bottom center"
     tick_position_x[[i]][which.max(tick_list[[i]])]
